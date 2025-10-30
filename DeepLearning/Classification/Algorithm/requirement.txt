@@ -1,0 +1,15 @@
+# 项目依赖清单 (requirements.txt)
+
+# 核心框架
+torch>=1.10.0          # PyTorch深度学习框架
+torchvision>=0.11.0    # PyTorch视觉工具库，包含数据集和图像变换
+
+# 数据处理与数值计算
+numpy>=1.21.0          # 数值计算库
+matplotlib>=3.4.0      # 数据可视化库
+
+
+# 说明：
+# 1. 安装命令：pip install -r requirements.txt
+# 2. 版本号使用>=确保兼容性，可根据实际环境调整
+# 3. 本项目主要依赖PyTorch生态及基础数据处理库，无特殊依赖
