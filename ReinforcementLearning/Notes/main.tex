@@ -1,0 +1,32 @@
+\documentclass{article}
+\usepackage{ctex}          % 支持中文排版
+\usepackage{algorithm}     % 算法环境核心包
+\usepackage{algorithmic}   % 伪代码语法支持
+\usepackage{amsmath}       % 数学公式排版
+\usepackage{amssymb}       % 数学符号支持
+\usepackage{geometry}      % 页面布局调整
+\geometry{a4paper, margin=1in}  % A4纸，1英寸边距
+\usepackage{color}
+\usepackage{setspace} 
+\setstretch{1.5} 
+\usepackage{tcolorbox} 
+\tcbset{
+    importantbox/.style={
+        colback=blue!5,    
+        colframe=blue!50,  
+        rounded corners,    % 启用圆角
+        arc=0.5em,          % 圆角半径
+        boxrule=0.8pt,     
+        left=0.8em,         % 左内边距
+        right=0.8em,        % 右内边距
+        top=0.8em,          % 上内边距
+        bottom=0.8em,       % 下内边距
+        fontupper=\small   
+    }
+}
+\begin{document}
+
+\input{DQN}
+\input{DDQN}
+
+\end{document}

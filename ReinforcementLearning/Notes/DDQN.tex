@@ -1,0 +1,155 @@
+\section{Double DQN}
+
+DQN算法通过经验回放和目标网络两大机制，解决了高维状态空间下Q学习的训练不稳定性问题，但仍存在一个关键缺陷——Q值过估计（Overestimation Bias）。
+
+这种过估计源于DQN的目标值计算方式：使用同一目标网络同时完成“动作选择”和“价值评估”，神经网络的逼近误差会被$\max$操作放大，导致Q值系统性偏高，进而引发策略次优、收敛速度减慢等问题。
+
+为解决这一问题，便有了Double DQN（DDQN） 算法，其核心思想源于经典的Double Q-Learning：将动作选择与价值评估解耦，通过两个独立的网络分别完成这两项任务，从而打破过估计的正向反馈循环，显著提升Q值估计的准确性和算法稳定性。
+
+“解耦”（Decoupling） 指的是将 DQN 中 “动作选择” 和 “价值评估” 这两个原本绑定在同一网络的任务，拆分给两个独立网络分别完成，避免单一网络的偏差被放大，核心是 “职责分离、相互独立”。
+
+\subsection{DDQN and DQN}
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.8}  % 增加表格行间距
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{对比维度}       & \textbf{DQN算法}                          & \textbf{DDQN算法}                          \\
+\hline
+目标值计算逻辑 & 目标网络同时负责动作选择与评估    & 在线网络选动作，目标网络做评估    \\
+\hline
+目标值公式     & $y_t^{DQN} = r_t + \gamma \max_{a'} Q_{\theta^-}(s_{t+1}, a')$ & 
+\begin{tabular}[c]{@{}l@{}}
+$y_t^{DDQN} = r_t + \gamma Q_{\theta^-}\big(s_{t+1},$ \\
+$~~~~~~~~~~~~~~~\arg\max_{a'} Q_{\theta}(s_{t+1}, a')\big)$
+\end{tabular} \\
+\hline
+过估计风险     & 高（单一网络偏差被$\max$放大）    & 低（双网络解耦，偏差相互抵消）    \\
+\hline
+网络结构       & 双网络（训练网络$+$目标网络）       & 双网络（在线网络$+$目标网络，结构一致） \\
+\hline
+实现成本       & 基础版本                         & 仅修改目标值计算，无额外开销      \\
+\hline
+\end{tabular}
+\caption{DQN and DDQN}
+\label{tab:dqn_ddqn_compare}
+\end{table}
+
+% 核心机制框选突出
+\begin{tcolorbox}[title={DDQN核心机制：解耦动作选择与价值评估}]
+DDQN沿用DQN的“双网络”架构，但赋予两个网络明确的分工：
+
+1. 在线网络（$Q_\theta(s,a)$）：负责动作选择，即通过$\arg\max_{a'} Q_\theta(s_{t+1}, a')$确定下一状态的最优动作，反映当前训练策略的偏好；
+
+2. 目标网络（$Q_{\theta^-}(s,a)$）：负责价值评估，即对在线网络选择的最优动作进行Q值计算，提供稳定的目标值基准。
+\end{tcolorbox}
+
+这种分工的关键优势在于：即使两个网络都存在估计误差，它们同时高估同一动作价值的概率极低，从而有效抑制过估计偏差的累积。
+
+\subsection{DDQN Method}
+DDQN的损失函数形式与DQN一致，仍采用均方误差（MSE）损失，但目标值替换为解耦计算后的$y_t^{DDQN}$：
+\[
+\boxed{L(\theta) = \frac{1}{N} \sum_{i=1}^N \left[ Q_\theta(s_i,a_i) - y_i^{DDQN} \right]^2}
+\]
+其中，$y_i^{DDQN}$为DDQN的目标值，分两种情况计算：
+\[
+y_i^{DDQN} = 
+\begin{cases} 
+r_i & \text{若 } done_i = \text{True（终止状态，无未来奖励）} \\
+r_i + \gamma Q_{\theta^-}(s_{i+1}, \arg\max_{a'} Q_\theta(s_{i+1}, a')) & \text{否则}
+\end{cases}
+\]
+$\gamma \in [0,1]$为折扣因子，$N$为经验回放池的采样批量大小。
+
+\vspace{2em}
+\noindent \textbf{DDQN算法优势}：
+\begin{itemize}
+\item 显著缓解过估计：实验证明在Atari游戏等任务中，DDQN的平均Q值更接近真实值，策略更稳健；
+ \item 兼容性强：可与DQN的其他改进（如优先经验回放、Dueling架构）无缝结合；
+ \item 稳定性提升：目标值计算更可靠，避免因过估计导致的策略震荡，收敛速度更快。
+\end{itemize}
+
+\subsection{DDQN Algorithm}
+
+\begin{algorithm}[H]
+\caption{Double DQN（DDQN）完整算法流程}
+\label{alg:ddqn_full}
+\begin{algorithmic}[1]  % 显示行号
+    \REQUIRE 环境状态空间 $\mathcal{S}$、动作空间 $\mathcal{A}$、折扣因子 $\gamma$、学习率 $\alpha$、
+             探索率 $\epsilon$（衰减策略）、目标网络更新间隔 $C$、经验回放池容量 $M$、采样批量 $N$、
+             训练总序列数 $E$、每个序列最大时间步 $T$
+    \ENSURE 低偏差的动作价值网络 $Q_\theta(s,a)$
+    
+    % 初始化步骤
+    \STATE 随机初始化在线网络参数 $\theta$，构建 $Q_\theta(s,a)$（负责动作选择与预测）
+    \STATE 复制参数 $\theta^- \leftarrow \theta$，初始化目标网络 $Q_{\theta^-}(s,a)$（负责价值评估）
+    \STATE 初始化经验回放池 $R$（容量为 $M$）
+    \STATE 初始化探索率 $\epsilon$（如 $\epsilon_{\text{init}} = 1.0$，最小探索率 $\epsilon_{\text{min}} = 0.01$）
+    
+    % 序列循环（Episode Loop）
+    \FOR{$e = 1$ \TO $E$}
+        \STATE 获取环境初始状态 $s_1$（转换为网络输入格式，如向量/矩阵）
+        \STATE 重置当前序列累计回报 $R_{\text{total}} = 0$
+        
+        % 时间步循环（Time Step Loop）
+        \FOR{$t = 1$ \TO $T$}
+            % 1. 基于ε-贪婪策略选择动作（在线网络决策）
+            \STATE 生成随机数 $rand \sim U(0,1)$
+            \IF{$rand < \epsilon$}
+                \STATE 随机选择动作 $a_t \in \mathcal{A}$（探索）
+            \ELSE
+                \STATE 在线网络选贪婪动作：$a_t = \arg\max_{a \in \mathcal{A}} Q_\theta(s_t, a)$（利用）
+            \ENDIF
+            
+            % 2. 与环境交互
+            \STATE 执行动作 $a_t$，获得即时回报 $r_t$、下一状态 $s_{t+1}$、终止标志 $done$
+            \STATE $R_{\text{total}} = R_{\text{total}} + r_t$
+            
+            % 3. 存储经验到回放池
+            \STATE 将经验元组 $(s_t, a_t, r_t, s_{t+1}, done)$ 存入 $R$（超容量时替换旧经验）
+            
+            % 4. 经验回放更新在线网络（核心步骤：解耦目标值计算）
+            \IF{$\text{len}(R) \geq N$}  % 回放池数据量满足采样要求
+                \STATE 从 $R$ 中随机采样 $N$ 个经验 $\{(s_i, a_i, r_i, s_{i+1}, done_i)\}_{i=1}^N$
+                \STATE 对每个采样经验，用在线网络选择下一状态最优动作：
+                    $a_i^* = \arg\max_{a' \in \mathcal{A}} Q_\theta(s_{i+1}, a')$
+                \STATE 用目标网络计算DDQN目标值 $y_i^{DDQN}$：
+                \[
+                y_i^{DDQN} = 
+                \begin{cases} 
+                r_i & \text{若 } done_i = \text{True} \\
+                r_i + \gamma Q_{\theta^-}(s_{i+1}, a_i^*) & \text{否则}
+                \end{cases}
+                \]
+                \STATE 计算损失函数 $L = \frac{1}{N} \sum_{i=1}^N (y_i^{DDQN} - Q_\theta(s_i, a_i))^2$
+                \STATE 基于梯度下降更新在线网络参数：$\theta \leftarrow \theta - \alpha \nabla_\theta L$
+            \ENDIF
+            
+            % 5. 定期更新目标网络（与DQN一致，保证稳定性）
+            \IF{$t \mod C == 0$}
+                \STATE 复制在线网络参数到目标网络：$\theta^- \leftarrow \theta$
+            \ENDIF
+            
+            % 6. 终止状态判断
+            \IF{$done$}
+                \STATE 输出当前序列回报 $R_{\text{total}}$，跳出时间步循环
+            \ELSE
+                \STATE $s_t = s_{t+1}$（状态转移）
+            \ENDIF
+        \ENDFOR
+        
+        % 7. 探索率衰减（平衡探索与利用）
+        \STATE $\epsilon = \epsilon \times \epsilon_{\text{decay}}$（如 $\epsilon_{\text{decay}} = 0.995$）
+        \STATE $\epsilon = \max(\epsilon_{\text{min}}, \epsilon)$（限制最小探索率）
+    \ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{算法说明}
+\begin{itemize}
+\item 目标网络更新：仍采用“硬更新”策略（每隔$C$步复制参数），也可采用“软更新”（$\theta^- \leftarrow \tau\theta + (1-\tau)\theta^-$，$\tau$为小权重如0.001），进一步提升稳定性；
+\item 经验回放池：功能与DQN一致，用于打破样本时序相关性，避免参数更新偏向近期经验；
+\item 适用场景：适用于所有DQN可解决的任务，尤其在奖励稀疏、动作空间复杂的环境中，过估计缓解效果更显著（如机器人导航、复杂游戏AI）；
+\item 扩展方向：DDQN是Rainbow DQN（集大成改进算法）的核心组件之一，可与优先经验回放（PER）、竞争网络（Dueling DQN）等结合，进一步提升性能。
+\end{itemize}
+

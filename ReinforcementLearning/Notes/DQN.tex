@@ -1,0 +1,107 @@
+\section{DQN}
+
+\subsection{DQN Method}
+
+DQN（Deep Q-Network）算法最终更新的目标是让动作价值函数 $Q_\omega(s,a)$ 逼近时序差分（TD）目标 $r + \gamma \max_{a'} Q_\omega(s',a')$，其中 $\omega$ 表示网络参数，$s$ 为当前状态，$a$ 为当前动作，$r$ 为即时回报，$s'$ 为下一状态，$\gamma \in [0,1]$ 为折扣因子。
+
+由于 TD 误差目标本身包含神经网络的输出，因此在更新网络参数 $\omega$ 的同时，目标值也会随之不断改变，这容易导致神经网络训练的不稳定性（如参数震荡、收敛缓慢）。
+
+为解决这一问题，DQN 引入了{\color{red} 目标网络（Target Network） }的核心思想：暂时固定 TD 目标中的 $Q$ 网络，避免目标值随训练网络实时波动。
+
+
+\begin{tcolorbox}[title={具体实现}]
+需构建两套结构完全相同但参数更新不同步的 $Q$ 网络
+\tcblower
+
+\begin{enumerate}
+    \item 训练网络 $Q_\omega(s,a)$：用于计算损失函数中的预测项 $Q_\omega(s,a)$，通过梯度下降实时更新参数 $\omega$；
+    \item 目标网络 $Q_{\omega^-}(s,a)$：用于计算 TD 目标项 $r + \gamma \max_{a'} Q_{\omega^-}(s',a')$，其中 $\omega^-$ 为目标网络参数。目标网络不随训练网络实时更新，而是每隔 $C$ 步（超参数）复制一次训练网络的当前参数，即 $\omega^- \leftarrow \omega$，以此保证目标值的稳定性。
+\end{enumerate}
+\end{tcolorbox}
+
+
+\noindent 此时，DQN 的损失函数修正为：
+\[
+\boxed{ L(\omega) = \frac{1}{N} \sum_{i=1}^N \left[ Q_\omega(s_i,a_i) - \left( r_i + \gamma \max_{a'} Q_{\omega^-}(s_{i+1},a') \right) \right]^2 }
+\]
+其中 $N$ 为经验回放池的采样批量大小。
+
+\subsection{DQN Algorithm}
+
+\begin{algorithm}[H]  % H：强制当前位置排版（可改为t/b/p自动排版）
+\caption{DQN 算法完整流程}
+\label{alg:dqn_full}  % 算法标签，用于交叉引用
+\begin{algorithmic}[1]  % [1]：显示行号
+    \REQUIRE 环境状态空间 $\mathcal{S}$、动作空间 $\mathcal{A}$、折扣因子 $\gamma$、学习率 $\alpha$、
+             探索率 $\epsilon$（衰减策略）、目标网络更新间隔 $C$、经验回放池容量 $M$、采样批量 $N$、
+             训练总序列数 $E$、每个序列最大时间步 $T$
+    \ENSURE 训练稳定的动作价值网络 $Q_\omega(s,a)$
+    
+    % 初始化步骤
+    \STATE 随机初始化训练网络参数 $\omega$，构建 $Q_\omega(s,a)$
+    \STATE 复制参数 $\omega^- \leftarrow \omega$，初始化目标网络 $Q_{\omega^-}(s,a)$
+    \STATE 初始化经验回放池 $R$（容量为 $M$）
+    \STATE 初始化探索率 $\epsilon$（如 $\epsilon_{\text{init}} = 1.0$）
+    
+    % 序列循环（Episode Loop）
+    \FOR{$e = 1$ \TO $E$}
+        \STATE 获取环境初始状态 $s_1$（将状态转换为网络输入格式，如向量/矩阵）
+        \STATE 重置当前序列的累计回报 $R_{\text{total}} = 0$
+        
+        % 时间步循环（Time Step Loop）
+        \FOR{$t = 1$ \TO $T$}
+            % 1. 基于ε-贪婪策略选择动作
+            \STATE 生成随机数 $rand \sim U(0,1)$
+            \IF{$rand < \epsilon$}
+                \STATE 随机选择动作 $a_t \in \mathcal{A}$（探索）
+            \ELSE
+                \STATE 选择贪婪动作 $a_t = \arg\max_{a \in \mathcal{A}} Q_\omega(s_t, a)$（利用）
+            \ENDIF
+            
+            % 2. 与环境交互
+            \STATE 执行动作 $a_t$，获得即时回报 $r_t$、下一状态 $s_{t+1}$、终止标志 $done$
+            \STATE $R_{\text{total}} = R_{\text{total}} + r_t$
+            
+            % 3. 存储经验到回放池
+            \STATE 将经验元组 $(s_t, a_t, r_t, s_{t+1}, done)$ 存入 $R$（若容量超 $M$，替换旧经验）
+            
+            % 4. 经验回放更新训练网络
+            \IF{$\text{len}(R) \geq N$}  % 回放池数据量足够采样
+                \STATE 从 $R$ 中随机采样 $N$ 个经验 $\{(s_i, a_i, r_i, s_{i+1}, done_i)\}_{i=1}^N$
+                \STATE 对每个采样经验计算 TD 目标 $y_i$：
+                \[
+                y_i = 
+                \begin{cases} 
+                r_i & \text{若 } done_i = \text{True（终止状态）} \\
+                r_i + \gamma \max_{a' \in \mathcal{A}} Q_{\omega^-}(s_{i+1}, a') & \text{否则}
+                \end{cases}
+                \]
+                \STATE 计算损失函数 $L = \frac{1}{N} \sum_{i=1}^N (y_i - Q_\omega(s_i, a_i))^2$
+                \STATE 基于梯度下降更新训练网络参数 $\omega$（$\omega \leftarrow \omega - \alpha \nabla_\omega L$）
+            \ENDIF
+            
+            % 5. 更新目标网络（每隔C步）
+            \IF{$t \mod C == 0$}
+                \STATE 复制训练网络参数到目标网络：$\omega^- \leftarrow \omega$
+            \ENDIF
+            
+            % 6. 终止状态判断
+            \IF{$done$}
+                \STATE 输出当前序列回报 $R_{\text{total}}$，跳出时间步循环
+            \ELSE
+                \STATE $s_t = s_{t+1}$（状态转移）
+            \ENDIF
+        \ENDFOR
+        
+        % 7. 探索率衰减（降低探索比例）
+        \STATE $\epsilon = \epsilon \times \epsilon_{\text{decay}}$（如 $\epsilon_{\text{decay}} = 0.995$）
+        \STATE $\epsilon = \max(\epsilon_{\text{min}}, \epsilon)$（设置最小探索率，如 $\epsilon_{\text{min}} = 0.01$）
+    \ENDFOR
+\end{algorithmic}
+\end{algorithm}
+\begin{itemize}
+\item 经验回放池：避免样本相关性导致的训练不稳定，通过随机采样打破经验的时序关联；
+\item 目标网络：固定 TD 目标值，减少参数更新时的目标波动，提升收敛稳定性；
+\item $\epsilon$-贪婪策略：平衡探索（发现新动作）与利用（选择已知最优动作），通过衰减 $\epsilon$ 逐步降低探索比例。
+\end{itemize}
+
