@@ -1,0 +1,4 @@
+# Regression 回归算法依赖
+torch>=1.10.0
+numpy>=1.21.0
+matplotlib>=3.4.0

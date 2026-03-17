@@ -1,0 +1,5 @@
+# Classification 图像分类算法依赖
+torch>=1.10.0
+torchvision>=0.11.0
+numpy>=1.21.0
+matplotlib>=3.4.0
